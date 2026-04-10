@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jungle Defender</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; font-family:'Courier New',monospace; user-select:none; }
+
+/* ── Overlay schermen ─────────────────────────────────── */
+.screen {
+  position:fixed; inset:0; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; z-index:100;
+  background:linear-gradient(160deg,#050f02 0%,#0a1f05 60%,#050f02 100%);
+  color:#aaffaa;
+}
+.screen h1 {
+  font-size:54px; letter-spacing:7px; margin-bottom:6px;
+  text-shadow:0 0 28px #0f0,0 0 55px #0a0;
+}
+.subtitle { font-size:13px; color:#4a8a4a; letter-spacing:3px; margin-bottom:26px; }
+
+.box {
+  background:rgba(0,22,0,.72); border:1px solid #1a5a1a;
+  padding:16px 26px; border-radius:6px; margin-bottom:18px;
+  max-width:460px; width:92%;
+}
+.box h3 { color:#4f4; font-size:11px; letter-spacing:4px; margin-bottom:9px; }
+.box p  { color:#7aaa7a; margin:4px 0; font-size:13px; }
+.box kbd {
+  background:#071a07; border:1px solid #2a5a2a;
+  padding:1px 7px; border-radius:3px; color:#aff;
+}
+.box .enemy-row { display:flex; justify-content:space-between; padding:3px 0; }
+.box .enemy-row span { font-size:12px; }
+.box .enemy-row .tag { color:#6af; }
+
+.btn {
+  padding:13px 44px; font-size:18px; cursor:pointer; letter-spacing:3px;
+  background:linear-gradient(135deg,#0a4a0a,#1a7a1a);
+  color:#cfc; border:1px solid #3a7a3a; border-radius:5px;
+  font-family:'Courier New',monospace; transition:all .18s;
+}
+.btn:hover { background:linear-gradient(135deg,#1a6a1a,#2a9a2a); transform:scale(1.05); box-shadow:0 0 22px #0f05; }
+.btn.red   { background:linear-gradient(135deg,#4a0a0a,#7a1a1a); border-color:#7a2a2a; color:#fcc; }
+.btn.red:hover { background:linear-gradient(135deg,#6a1a1a,#9a2a2a); }
+
+/* ── HUD ─────────────────────────────────────────────── */
+#hud {
+  display:none; position:fixed; inset:0;
+  pointer-events:none; z-index:10;
+}
+
+/* Crosshair */
+#ch { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:22px; height:22px; }
+#ch::before,#ch::after { content:''; position:absolute; background:rgba(255,255,255,.85); border-radius:1px; }
+#ch::before { width:2px; height:22px; left:10px; top:0; }
+#ch::after  { width:22px; height:2px; top:10px; left:0; }
+#ch.red::before,#ch.red::after { background:#f55; }
+
+/* Bottom-left: health */
+#bl { position:absolute; bottom:20px; left:20px; }
+.lbl { font-size:9px; color:#4a7a4a; letter-spacing:3px; margin-bottom:4px; }
+.bar-bg { width:175px; height:11px; background:#051005; border:1px solid #1a4a1a; border-radius:5px; overflow:hidden; }
+#hpfill { height:100%; width:100%; background:linear-gradient(90deg,#1c8a1c,#2dcc2d); border-radius:5px; transition:width .15s,background .35s; }
+
+/* Bottom-right: ammo */
+#br { position:absolute; bottom:20px; right:20px; text-align:right; }
+#ammo-num { font-size:34px; color:#eee; letter-spacing:1px; }
+#ammo-num .sep { color:#3a3a3a; font-size:22px; }
+#ammo-num .mx  { color:#555;    font-size:22px; }
+#rld { font-size:11px; color:#f90; letter-spacing:4px; margin-top:3px; display:none; }
+
+/* Top stats */
+#top { position:absolute; top:16px; left:0; right:0; display:flex; justify-content:space-between; padding:0 20px; }
+.pill { background:rgba(0,18,0,.68); border:1px solid #183a18; padding:6px 15px; border-radius:4px; }
+.pill .lbl { margin-bottom:1px; }
+.pill .val { font-size:20px; color:#cfc; }
+
+/* Wave announce */
+#wa {
+  position:absolute; top:37%; left:50%; transform:translateX(-50%);
+  font-size:28px; letter-spacing:7px; color:#ff4;
+  text-shadow:0 0 18px #ff0; opacity:0; pointer-events:none;
+  transition:opacity .3s;
+}
+
+/* Damage vignette */
+#vig {
+  position:absolute; inset:0; opacity:0; pointer-events:none;
+  box-shadow:inset 0 0 90px rgba(255,0,0,.72); transition:opacity .12s;
+}
+
+/* Low-health pulse */
+@keyframes pulseRed { 0%,100%{opacity:0} 50%{opacity:.28} }
+#lowhp {
+  display:none; position:absolute; inset:0; pointer-events:none;
+  background:radial-gradient(ellipse at center,transparent 40%,rgba(200,0,0,.5) 100%);
+  animation:pulseRed 1.1s infinite;
+}
+
+/* Enemy label popup */
+#enlbl {
+  position:absolute; top:44%; left:50%; transform:translateX(-50%);
+  font-size:12px; color:#f88; letter-spacing:2px; opacity:0; pointer-events:none;
+  transition:opacity .18s;
+}
+
+#hint { position:absolute; top:16px; left:50%; transform:translateX(-50%); font-size:10px; color:#1e3a1e; letter-spacing:3px; }
+</style>
+</head>
+<body>
+
+<!-- START SCHERM -->
+<div class="screen" id="startScreen">
+  <h1>JUNGLE DEFENDER</h1>
+  <div class="subtitle">OVERLEVEN IN DE VIJANDIGE JUNGLE</div>
+  <div class="box">
+    <h3>BESTURING</h3>
+    <p><kbd>W A S D</kbd> &nbsp; Bewegen &nbsp;|&nbsp; <kbd>Shift</kbd> Rennen</p>
+    <p><kbd>Linker muisknop</kbd> &nbsp; Schieten</p>
+    <p><kbd>R</kbd> &nbsp; Herladen &nbsp;|&nbsp; <kbd>ESC</kbd> Muisbesturing vrijgeven</p>
+  </div>
+  <div class="box">
+    <h3>VIJANDEN</h3>
+    <div class="enemy-row"><span>🐗 Wild Zwijn</span>     <span class="tag">snel · golf 1+</span></div>
+    <div class="enemy-row"><span>🕷 Reuzenspider</span>   <span class="tag">groepen · golf 2+</span></div>
+    <div class="enemy-row"><span>🤖 Gevechtsrobot</span>  <span class="tag">sterk · golf 3+</span></div>
+    <div class="enemy-row"><span>👽 Alien</span>          <span class="tag">supersnel · golf 4+</span></div>
+    <div class="enemy-row"><span>💀 Mutant Boss</span>    <span class="tag">elke 5e golf</span></div>
+  </div>
+  <button class="btn" id="startBtn">▶ SPEL STARTEN</button>
+</div>
+
+<!-- GAME OVER -->
+<div class="screen" id="goScreen" style="display:none">
+  <h1 style="color:#f44;text-shadow:0 0 30px #f00">GAME OVER</h1>
+  <div class="subtitle">JE BENT GEVALLEN IN DE JUNGLE</div>
+  <div class="box">
+    <h3>EINDRESULTAAT</h3>
+    <p>Golf bereikt: &nbsp;<strong id="go-w" style="color:#ff4;font-size:19px">0</strong></p>
+    <p>Vijanden verslagen: &nbsp;<strong id="go-k" style="color:#4f4;font-size:19px">0</strong></p>
+    <p>Score: &nbsp;<strong id="go-s" style="color:#4ff;font-size:24px">0</strong></p>
+  </div>
+  <button class="btn red" id="rstBtn">↺ OPNIEUW SPELEN</button>
+</div>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="ch"></div>
+  <div id="bl">
+    <div class="lbl">GEZONDHEID</div>
+    <div class="bar-bg"><div id="hpfill"></div></div>
+  </div>
+  <div id="br">
+    <div class="lbl">MUNITIE</div>
+    <div id="ammo-num">
+      <span id="ac">15</span><span class="sep"> / </span><span class="mx">15</span>
+    </div>
+    <div id="rld">⟳ HERLADEN</div>
+  </div>
+  <div id="top">
+    <div class="pill"><div class="lbl">GOLF</div><div class="val" id="sv">1</div></div>
+    <div class="pill"><div class="lbl">VIJANDEN</div><div class="val" id="se">0</div></div>
+    <div class="pill"><div class="lbl">KILLS</div><div class="val" id="sk">0</div></div>
+  </div>
+  <div id="wa"></div>
+  <div id="vig"></div>
+  <div id="lowhp"></div>
+  <div id="enlbl"></div>
+  <div id="hint">ESC = MUIS VRIJGEVEN</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ════════════════════════════════════════════════════════════
+//  JUNGLE DEFENDER — complete game engine
+// ════════════════════════════════════════════════════════════
+
+// ── Hulpfuncties ──────────────────────────────────────────
+function lerp(a,b,t){ return a+(b-a)*t; }
+function rnd(a,b){ return a+Math.random()*(b-a); }
+function rndI(a,b){ return Math.floor(a+Math.random()*(b-a+1)); }
+
+// ── Audio Engine ──────────────────────────────────────────
+let AC = null;
+function initAudio(){ if(!AC) AC = new (window.AudioContext||window.webkitAudioContext)(); }
+
+function noiseBurst(dur, gain, freqPeak){
+  if(!AC) return;
+  const buf = AC.createBuffer(1, AC.sampleRate*dur, AC.sampleRate);
+  const d   = buf.getChannelData(0);
+  for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length, 2.2);
+  const src = AC.createBufferSource(); src.buffer = buf;
+  const flt = AC.createBiquadFilter(); flt.type='bandpass'; flt.frequency.value=freqPeak; flt.Q.value=0.9;
+  const g = AC.createGain(); g.gain.value = gain;
+  src.connect(flt); flt.connect(g); g.connect(AC.destination); src.start();
+}
+function osc(type, freq0, freq1, dur, vol){
+  if(!AC) return;
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq0, AC.currentTime);
+  if(freq1) o.frequency.exponentialRampToValueAtTime(freq1, AC.currentTime+dur);
+  g.gain.setValueAtTime(vol, AC.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, AC.currentTime+dur);
+  o.connect(g); g.connect(AC.destination);
+  o.start(); o.stop(AC.currentTime+dur);
+}
+
+function sndShot()      { noiseBurst(0.13, 0.45, 650); }
+function sndEmpty()     { osc('square',130,80,.06,.08); }
+function sndHit()       { osc('sawtooth',680,130,.13,.18); }
+function sndDie()       { osc('sawtooth',480,38,.42,.22); }
+function sndHurt()      { osc('square',260,65,.22,.12); }
+function sndReload(){
+  [0,.28,.58,.95].forEach((t,i)=>{
+    setTimeout(()=>osc('square',190+i*75,null,.08,.07),t*1000);
+  });
+}
+function sndWave(){
+  [0,.14,.28].forEach((t,i)=>{
+    setTimeout(()=>osc('sine',440+i*220,null,.22,.15),t*1000);
+  });
+}
+
+// ── Three.js ──────────────────────────────────────────────
+const scene    = new THREE.Scene();
+scene.background = new THREE.Color(0x0b1904);
+scene.fog      = new THREE.FogExp2(0x0b1904, 0.021);
+
+const camera   = new THREE.PerspectiveCamera(72, innerWidth/innerHeight, 0.07, 185);
+camera.position.set(0, 1.72, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+renderer.domElement.style.cssText = 'position:fixed;top:0;left:0;';
+document.body.insertBefore(renderer.domElement, document.body.firstChild);
+
+// Camera in scene zodat gun (child) meerendert
+scene.add(camera);
+
+// ── Verlichting ───────────────────────────────────────────
+scene.add(new THREE.AmbientLight(0x1e380e, 1.1));
+
+const sun = new THREE.DirectionalLight(0xddee99, 0.72);
+sun.position.set(40, 65, 28);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024,1024);
+sun.shadow.camera.far = 160;
+[-80,80].forEach(v=>{ sun.shadow.camera.left=v; sun.shadow.camera.right=-v; });
+sun.shadow.camera.top=80; sun.shadow.camera.bottom=-80;
+scene.add(sun);
+
+const fill = new THREE.DirectionalLight(0x0f2208, 0.28);
+fill.position.set(-22,12,-18); scene.add(fill);
+
+// ── Grond ─────────────────────────────────────────────────
+const gnd = new THREE.Mesh(
+  new THREE.PlaneGeometry(240,240),
+  new THREE.MeshLambertMaterial({color:0x1d490a})
+);
+gnd.rotation.x = -Math.PI/2; gnd.receiveShadow = true; scene.add(gnd);
+
+// ── Wereld generatie ──────────────────────────────────────
+const treeCols = []; // boom-botsers {x,z,r}
+
+function mat(color, emissive=0){
+  return new THREE.MeshLambertMaterial({color, emissive});
+}
+
+function spawnTree(x,z){
+  const g = new THREE.Group();
+  const s = rnd(.6,1.3);
+  const h = rnd(4,7)*s;
+  const tr = rnd(.17,.29)*s;
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(tr*.7,tr,h,7),
+    mat([0x3a1f08,0x2d1806][rndI(0,1)])
+  );
+  trunk.position.y = h/2; trunk.castShadow=true; g.add(trunk);
+  const cc = [0x0d3a05,0x1a5210,0x0f4508,0x234d10][rndI(0,3)];
+  const layers = rndI(2,4);
+  for(let i=0;i<layers;i++){
+    const cone = new THREE.Mesh(
+      new THREE.ConeGeometry((2.6-i*.3)*s, 2.9*s, rndI(6,8)),
+      mat(cc)
+    );
+    cone.position.y = h+i*1.65*s;
+    cone.rotation.y = rnd(0,Math.PI);
+    cone.castShadow=true; g.add(cone);
+  }
+  g.position.set(x,0,z);
+  g.rotation.y = rnd(0,Math.PI*2);
+  scene.add(g);
+  treeCols.push({x,z,r:tr*1.3+0.1});
+}
+
+function spawnBush(x,z){
+  const g = new THREE.Group();
+  const m = mat([0x0f3a08,0x1a5210,0x092f06][rndI(0,2)]);
+  for(let i=0;i<rndI(2,4);i++){
+    const b = new THREE.Mesh(new THREE.SphereGeometry(rnd(.3,.65),7,5), m);
+    b.position.set(rnd(-.4,.4),rnd(.28,.48),rnd(-.4,.4));
+    b.castShadow=true; g.add(b);
+  }
+  g.position.set(x,0,z); scene.add(g);
+}
+
+function spawnRock(x,z){
+  const s = rnd(.28,1.55);
+  const r = new THREE.Mesh(
+    new THREE.DodecahedronGeometry(s,0),
+    mat([0x5a5545,0x4a4535,0x6a6555][rndI(0,2)])
+  );
+  r.position.set(x,s*.35,z);
+  r.rotation.set(rnd(0,3),rnd(0,3),rnd(0,3));
+  r.castShadow=true; scene.add(r);
+}
+
+(function buildWorld(){
+  for(let i=0;i<130;i++){ const a=rnd(0,Math.PI*2),d=rnd(7,92); spawnTree(Math.cos(a)*d,Math.sin(a)*d); }
+  for(let i=0;i<80;i++){ const a=rnd(0,Math.PI*2),d=rnd(4,78); spawnBush(Math.cos(a)*d,Math.sin(a)*d); }
+  for(let i=0;i<42;i++){ const a=rnd(0,Math.PI*2),d=rnd(3,82); spawnRock(Math.cos(a)*d,Math.sin(a)*d); }
+})();
+
+// ── Pistool mesh ──────────────────────────────────────────
+const gunG = new THREE.Group();
+
+function box(w,h,d,x,y,z,c){ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat(c)); m.position.set(x,y,z); gunG.add(m); return m; }
+function cyl(rt,rb,h,x,y,z,rx,c){ const m=new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,8),mat(c)); m.position.set(x,y,z); if(rx) m.rotation.x=rx; gunG.add(m); return m; }
+
+// Slide
+box(.076,.11,.3, 0,0,0, 0x1c1c1c);
+// Greep
+const grip=box(.058,.13,.072, 0,-.104,.068, 0x111111); grip.rotation.x=.19;
+// Loop
+cyl(.015,.015,.24, 0,.018,-.25, Math.PI/2, 0x2a2a2a);
+// Vizier voor
+box(.022,.022,.012, 0,.059,-.132, 0x333333);
+// Vizier achter
+box(.048,.020,.010, 0,.059,.052, 0x333333);
+// Magazijn
+box(.05,.09,.06, 0,-.14,.062, 0x0a0a0a);
+// Trigger guard
+box(.056,.044,.068, 0,-.062,.018, 0x1a1a1a);
+
+gunG.position.set(.22,-.29,-.44);
+camera.add(gunG);
+
+let gunRz=0, gunRx=0; // terugslag
+
+// Muzzle flash licht
+const mzLight = new THREE.PointLight(0xffaa44, 0, 3.8);
+mzLight.position.set(0,.018,-.62);
+camera.add(mzLight);
+let mzTimer=0;
+
+// ── Vijandtypes definitie ─────────────────────────────────
+const TYPES = {
+  boar:{
+    lbl:'Wildezwijn', hp:50, spd:5.2, dmg:12, atkR:1.2,
+    bc:0x5a3010, hc:0x4a2808, ec:0xff2200,
+    w:.86,h:.53,d:1.12, yo:.26, rw:10
+  },
+  spider:{
+    lbl:'Reuzenspider', hp:46, spd:4.6, dmg:10, atkR:.9,
+    bc:0x0a0a0a, hc:0x150505, ec:0xff5500,
+    w:1.12,h:.44,d:1.12, yo:.26, rw:12
+  },
+  robot:{
+    lbl:'Gevechtsrobot', hp:115, spd:2.8, dmg:22, atkR:1.9,
+    bc:0x4a5a6a, hc:0x3a4a5a, ec:0x00aaff,
+    w:.78,h:1.56,d:.72, yo:.78, rw:26
+  },
+  alien:{
+    lbl:'Alien', hp:42, spd:6.6, dmg:15, atkR:.85,
+    bc:0x003322, hc:0x004433, ec:0x00ff88,
+    w:.53,h:1.28,d:.53, yo:.64, rw:19
+  },
+  mutant:{
+    lbl:'MUTANT BOSS', hp:360, spd:2.5, dmg:30, atkR:2.2,
+    bc:0x1a3a00, hc:0x2a4a00, ec:0xff6600,
+    w:1.32,h:2.12,d:1.12, yo:1.06, rw:65
+  }
+};
+
+// ── Vijand mesh bouwers ───────────────────────────────────
+function buildMesh(key){
+  const t=TYPES[key];
+  const g=new THREE.Group();
+  const BM=mat(t.bc), HM=mat(t.hc), EM=new THREE.MeshBasicMaterial({color:t.ec});
+
+  function Bx(w,h,d,x,y,z,m=BM){ const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m); o.position.set(x,y,z); o.castShadow=true; g.add(o); return o; }
+  function Sp(r,x,y,z,m=BM){ const o=new THREE.Mesh(new THREE.SphereGeometry(r,9,7),m); o.position.set(x,y,z); o.castShadow=true; g.add(o); return o; }
+  function Cy(rt,rb,h,x,y,z,rx=0,rz=0,m=BM){ const o=new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,7),m); o.position.set(x,y,z); o.rotation.x=rx; o.rotation.z=rz; o.castShadow=true; g.add(o); return o; }
+  function Co(r,h,x,y,z,m=BM){ const o=new THREE.Mesh(new THREE.ConeGeometry(r,h,6),m); o.position.set(x,y,z); o.castShadow=true; g.add(o); return o; }
+  function Eye(r,x,y,z){ const o=new THREE.Mesh(new THREE.SphereGeometry(r,7,6),EM); o.position.set(x,y,z); g.add(o); }
+
+  if(key==='boar'){
+    Bx(t.w,t.h,t.d, 0,t.h/2,0);                          // lichaam
+    Bx(t.w*.56,t.h*.52,t.d*.36, 0,t.h*.66,-(t.d/2+t.d*.12),HM); // snuit
+    const TM=mat(0xf5f0cc);
+    [-0.20,0.20].forEach(x=>Co(.045,.28,x,t.h*.5,-(t.d/2+.17),TM)); // slagtanden
+    [[-0.27,-0.3],[0.27,-0.3],[-0.27,0.3],[0.27,0.3]].forEach(([lx,lz])=>
+      Cy(.09,.07,.3,lx,.15,lz)); // poten
+    [-0.18,0.18].forEach(x=>Eye(.066,x,t.h*.73,-(t.d/2+t.d*.09)));
+
+  } else if(key==='spider'){
+    const A=Sp(.48,0,.42,0); A.scale.set(1,.74,1.1);     // achterlijf
+    const C=Sp(.32,0,.42,-.5,HM); C.castShadow=true;     // cephalothorax
+    const LM=mat(0x0f0f0f);
+    for(let s=-1;s<=1;s+=2){
+      for(let li=0;li<4;li++){
+        const zp=(li-1.5)*.22;
+        Cy(.03,.03,.55,s*.38,.42,zp, 0, s*(Math.PI/3.4),LM);
+        Cy(.025,.02,.48,s*.78,.13,zp+s*.1, 0,s*(-Math.PI/4.2),LM);
+      }
+    }
+    [-0.12,-.04,.04,.12].forEach(x=>Eye(.055,x,.5,-.8));
+
+  } else if(key==='robot'){
+    Bx(t.w,t.h*.48,t.d, 0,t.h*.42,0);                    // torso
+    Bx(t.w*.78,t.h*.27,t.d*.78, 0,t.h*.77,0,HM);         // hoofd
+    Cy(.025,.025,.33,0,t.h*.77+t.h*.19,0);                // antenne
+    const RBL=new THREE.MeshBasicMaterial({color:0xff0000});
+    const rb=new THREE.Mesh(new THREE.SphereGeometry(.06,7,7),RBL);
+    rb.position.set(0,t.h*.77+t.h*.19+.2,0); g.add(rb);
+    [-1,1].forEach(s=>{
+      Bx(.2,t.h*.38,.2, s*(t.w/2+.12),t.h*.42,0);        // bovenarm
+      Bx(.16,t.h*.28,.16,s*(t.w/2+.12),t.h*.12,0);       // onderarm
+      Sp(.1,s*(t.w/2+.02),t.h*.58,0,mat(0x888888));       // schouder
+      Cy(.22,.17,t.h*.38,s*.22,t.h*.19,0);                // been
+      Bx(.3,.12,.35,s*.22,.06,.05,mat(0x333333));          // voet
+    });
+    // Vizier (ogen)
+    const visor=new THREE.Mesh(new THREE.BoxGeometry(t.w*.52,.07,.04),EM);
+    visor.position.set(0,t.h*.77,-(t.d*.39+.01)); g.add(visor);
+
+  } else if(key==='alien'){
+    Cy(t.w*.28,t.w*.36,t.h*.55, 0,t.h*.38,0);            // torso
+    const hd=Sp(t.w*.52,0,t.h*.82,0,HM);
+    hd.scale.y=1.26;                                       // groot hoofd
+    const EMA=new THREE.MeshBasicMaterial({color:t.ec});
+    [-0.14,0.14].forEach(x=>{
+      const ey=new THREE.Mesh(new THREE.SphereGeometry(.11,8,6),EMA);
+      ey.scale.set(1.22,.65,.5);
+      ey.position.set(x,t.h*.86,-(t.w*.44)); g.add(ey);
+    });
+    [-1,1].forEach(s=>{
+      Cy(.04,.02,.65,s*.3,t.h*.42,0, 0,s*.76);            // arm
+      Sp(.07,s*.55,t.h*.28,0);                             // hand
+      Cy(.055,.04,t.h*.42,s*.13,t.h*.21,0);               // been
+    });
+
+  } else if(key==='mutant'){
+    Bx(t.w,t.h*.52,t.d, 0,t.h*.52,0);                    // torso
+    Bx(t.w*.9,t.h*.33,t.d*.82, 0,t.h*.94,0,HM);          // hoofd
+    const HNM=mat(0x1a0000);
+    [-0.3,0.3].forEach(x=>Co(.1,.46,x,t.h*1.13,0,HNM));  // hoorns
+    [-1,1].forEach(s=>{
+      Cy(.22,.18,t.h*.58,s*(t.w/2+.26),t.h*.5,0, 0,s*.45); // bovenarm
+      Cy(.17,.12,t.h*.42,s*(t.w/2+.5),t.h*.22,0, 0,s*.6);  // onderarm
+      const CM=mat(0x221100);
+      for(let c=0;c<3;c++){
+        const cl=new THREE.Mesh(new THREE.ConeGeometry(.06,.28,5),CM);
+        cl.rotation.x=Math.PI;
+        cl.position.set(s*(t.w/2+.5)+(c-1)*.12,t.h*.04,.06); g.add(cl);
+      }
+      Cy(.22,.17,t.h*.46,s*.32,t.h*.23,0);                  // been
+      Bx(.36,.18,.52,s*.32,.09,.08,mat(0x0a1a00));           // voet
+    });
+    [-0.22,0.22].forEach(x=>Eye(.12,x,t.h*.96,-(t.d*.42)));
+  }
+
+  return g;
+}
+
+// ── Spel-toestand ─────────────────────────────────────────
+let hp=100, kills=0, score=0, wave=1;
+let ammo=15; const MAXAMMO=15;
+let reloading=false, reloadT=0; const RDUR=1.8;
+let shootCD=0;
+let active=false, started=false;
+
+let yaw=0, pitch=0;
+const keys={};
+
+// Vijanden + golf
+const enemies=[];
+let wTotal=0, wKilled=0;
+let spawnQ=[], spawnT=0;
+let wDone=false, nextWave=0;
+
+// Particles
+const parts=[];
+
+// ── Golf configuratie ─────────────────────────────────────
+function waveEnemies(w){
+  const pool=[];
+  const avail=['boar'];
+  if(w>=2) avail.push('spider');
+  if(w>=3) avail.push('robot');
+  if(w>=4) avail.push('alien');
+  const cnt=5+w*3;
+  for(let i=0;i<cnt;i++) pool.push(avail[rndI(0,avail.length-1)]);
+  if(w%5===0) pool.push('mutant');
+  return pool;
+}
+
+function startWave(){
+  for(const e of enemies){ if(e.alive) scene.remove(e.mesh); }
+  enemies.length=0;
+  spawnQ=waveEnemies(wave);
+  wTotal=spawnQ.length; wKilled=0; wDone=false; spawnT=0;
+  announce('GOLF '+wave);
+  sndWave(); updateHUD();
+}
+
+function announce(txt){
+  const el=document.getElementById('wa');
+  el.textContent=txt; el.style.opacity='1';
+  setTimeout(()=>el.style.opacity='0',2600);
+}
+
+// ── Spawn vijand ──────────────────────────────────────────
+function spawnEnemy(k){
+  const t=TYPES[k];
+  const a=rnd(0,Math.PI*2), dist=rnd(22,42);
+  const x=camera.position.x+Math.cos(a)*dist;
+  const z=camera.position.z+Math.sin(a)*dist;
+  const mesh=buildMesh(k);
+  mesh.position.set(x,0,z); scene.add(mesh);
+  const wf=1+(wave-1)*.12;
+  enemies.push({
+    mesh, k, alive:true,
+    label:t.lbl,
+    hp:t.hp*wf, mhp:t.hp*wf,
+    spd:t.spd*(1+(wave-1)*.08),
+    dmg:t.dmg, atkR:t.atkR, atkT:t.atkR,
+    animT:rnd(0,Math.PI*2),
+    yo:t.yo, rw:t.rw
+  });
+}
+
+// ── Raycaster ─────────────────────────────────────────────
+const RC=new THREE.Raycaster();
+
+// ── Schieten ──────────────────────────────────────────────
+function shoot(){
+  if(!active||shootCD>0||reloading) return;
+  if(ammo<=0){ sndEmpty(); beginReload(); return; }
+
+  sndShot(); ammo--; shootCD=.12;
+  gunRz=.09; gunRx=.09; pitch-=.016;   // terugslag
+
+  mzLight.intensity=4.2; mzTimer=.065; // muzzle flash
+
+  // Raycaster vanuit cameracentrum
+  RC.setFromCamera({x:0,y:0}, camera);
+  const targets=[];
+  for(const e of enemies){
+    if(!e.alive) continue;
+    e.mesh.traverse(c=>{ if(c.isMesh) targets.push(c); });
+  }
+  const hits=RC.intersectObjects(targets,false);
+  if(hits.length){
+    const obj=hits[0].object;
+    for(const e of enemies){
+      if(!e.alive) continue;
+      let found=false;
+      e.mesh.traverse(c=>{ if(c===obj) found=true; });
+      if(found){ hitEnemy(e,29+wave*1.5); break; }
+    }
+  }
+  if(ammo<=0) beginReload();
+  updateHUD();
+}
+
+function hitEnemy(e,dmg){
+  e.hp-=dmg; sndHit();
+  // Wit-flits
+  e.mesh.traverse(c=>{
+    if(!c.isMesh) return;
+    const orig=c.material.color.clone();
+    c.material.color.set(0xffffff);
+    setTimeout(()=>{ if(c.material) c.material.color.copy(orig); },75);
+  });
+  // Crosshair rood
+  const ch=document.getElementById('ch');
+  ch.classList.add('red'); setTimeout(()=>ch.classList.remove('red'),120);
+  // Vijandnaam
+  const el=document.getElementById('enlbl');
+  el.textContent=e.label; el.style.opacity='1';
+  setTimeout(()=>el.style.opacity='0',1200);
+  if(e.hp<=0) killEnemy(e);
+}
+
+function killEnemy(e){
+  e.alive=false; scene.remove(e.mesh);
+  deathBurst(e.mesh.position.clone(), TYPES[e.k].ec);
+  kills++; wKilled++; score+=e.rw+wave*5;
+  sndDie(); updateHUD();
+  if(wKilled>=wTotal && spawnQ.length===0 && !wDone){
+    wDone=true; nextWave=5; announce('GOLF VOLTOOID!');
+  }
+}
+
+// ── Particles ─────────────────────────────────────────────
+function deathBurst(pos,color){
+  const m=new THREE.MeshBasicMaterial({color, transparent:true, opacity:1});
+  for(let i=0;i<8;i++){
+    const sz=rnd(.08,.2);
+    const mesh=new THREE.Mesh(new THREE.SphereGeometry(sz,5,4),m.clone());
+    mesh.position.copy(pos).setY(pos.y+rnd(.5,1.5));
+    scene.add(mesh);
+    parts.push({ mesh, vel:new THREE.Vector3(rnd(-3,3),rnd(2,6.5),rnd(-3,3)), life:1.0 });
+  }
+}
+function tickParts(dt){
+  for(let i=parts.length-1;i>=0;i--){
+    const p=parts[i]; p.life-=dt*1.4;
+    p.vel.y-=9*dt;
+    p.mesh.position.addScaledVector(p.vel,dt);
+    p.mesh.material.opacity=Math.max(0,p.life);
+    if(p.life<=0){ scene.remove(p.mesh); parts.splice(i,1); }
+  }
+}
+
+// ── Herladen ──────────────────────────────────────────────
+function beginReload(){
+  if(reloading||ammo===MAXAMMO) return;
+  reloading=true; reloadT=RDUR;
+  document.getElementById('rld').style.display='block';
+  document.getElementById('ac').textContent='-';
+  sndReload();
+}
+
+// ── Speler schade ─────────────────────────────────────────
+function hurtPlayer(dmg){
+  hp=Math.max(0,hp-dmg); sndHurt();
+  const v=document.getElementById('vig');
+  v.style.opacity='1'; setTimeout(()=>v.style.opacity='0',200);
+  pitch+=rnd(-.035,.035); yaw+=rnd(-.025,.025);
+  document.getElementById('lowhp').style.display=hp<30?'block':'none';
+  updateHUD();
+  if(hp<=0) gameOver();
+}
+
+// ── HUD update ─────────────────────────────────────────────
+function updateHUD(){
+  const pct=(hp/100)*100;
+  const hf=document.getElementById('hpfill');
+  hf.style.width=pct+'%';
+  hf.style.background=pct>55
+    ?'linear-gradient(90deg,#1c8a1c,#2dcc2d)'
+    :pct>25
+      ?'linear-gradient(90deg,#cc8800,#ffaa00)'
+      :'linear-gradient(90deg,#aa1111,#dd2222)';
+  if(!reloading) document.getElementById('ac').textContent=ammo;
+  document.getElementById('sv').textContent=wave;
+  document.getElementById('sk').textContent=kills;
+  const alive=enemies.filter(e=>e.alive).length;
+  document.getElementById('se').textContent=alive+spawnQ.length;
+}
+
+// ── Game Over ─────────────────────────────────────────────
+function gameOver(){
+  active=false; document.exitPointerLock();
+  document.getElementById('hud').style.display='none';
+  document.getElementById('go-w').textContent=wave;
+  document.getElementById('go-k').textContent=kills;
+  document.getElementById('go-s').textContent=score;
+  document.getElementById('goScreen').style.display='flex';
+}
+
+// ── Input ─────────────────────────────────────────────────
+document.addEventListener('keydown',e=>{
+  keys[e.code]=true;
+  if(e.code==='KeyR'&&active&&!reloading&&ammo<MAXAMMO) beginReload();
+});
+document.addEventListener('keyup',e=>{ keys[e.code]=false; });
+
+document.addEventListener('mousemove',e=>{
+  if(!active) return;
+  yaw  -=e.movementX*.00175;
+  pitch =Math.max(-1.15,Math.min(1.15,pitch-e.movementY*.00175));
+});
+
+renderer.domElement.addEventListener('mousedown',e=>{
+  if(e.button===0&&active) shoot();
+});
+
+document.addEventListener('pointerlockchange',()=>{
+  active=document.pointerLockElement===renderer.domElement;
+});
+
+// ── Game klok ─────────────────────────────────────────────
+const clock=new THREE.Clock();
+
+// ── Hoofdlus ──────────────────────────────────────────────
+function animate(){
+  requestAnimationFrame(animate);
+  const dt=Math.min(clock.getDelta(),.05);
+
+  if(started&&active){
+    // Camera rotatie (YXZ = FPS-volgorde, geen gimbal lock)
+    camera.rotation.order='YXZ';
+    camera.rotation.y=yaw;
+    camera.rotation.x=pitch;
+
+    // Spelerbeweging
+    const spd=(keys['ShiftLeft']||keys['ShiftRight'])?8.6:5.1;
+    const mv=new THREE.Vector3(
+      (keys['KeyD']?1:0)-(keys['KeyA']?1:0),
+      0,
+      (keys['KeyS']?1:0)-(keys['KeyW']?1:0)
+    );
+    const moving=mv.lengthSq()>0;
+    if(moving){
+      mv.normalize().multiplyScalar(spd*dt);
+      mv.applyAxisAngle(new THREE.Vector3(0,1,0),yaw);
+      camera.position.x+=mv.x; camera.position.z+=mv.z;
+      const bnd=87;
+      if(camera.position.length()>bnd) camera.position.setLength(bnd);
+    }
+    camera.position.y=1.72;
+
+    // Boom-botsing (cilinder per boom)
+    for(const t of treeCols){
+      const dx=camera.position.x-t.x, dz=camera.position.z-t.z;
+      const d=Math.sqrt(dx*dx+dz*dz);
+      const minD=t.r+0.33;
+      if(d<minD&&d>0){
+        const push=(minD-d)/d;
+        camera.position.x+=dx*push; camera.position.z+=dz*push;
+      }
+    }
+
+    // Pistool animatie
+    const sway=moving?Math.sin(Date.now()*.006)*.005:0;
+    gunRz=lerp(gunRz,0,14*dt); gunRx=lerp(gunRx,0,14*dt);
+    gunG.position.set(.22,-.29+sway,-.44+gunRz);
+    gunG.rotation.x=-gunRx;
+
+    // Muzzle flash
+    if(mzTimer>0){ mzTimer-=dt; if(mzTimer<=0) mzLight.intensity=0; }
+
+    // Schiet-cooldown
+    if(shootCD>0) shootCD-=dt;
+
+    // Herladen
+    if(reloading){
+      reloadT-=dt;
+      if(reloadT<=0){
+        reloading=false; ammo=MAXAMMO;
+        document.getElementById('rld').style.display='none';
+        updateHUD();
+      }
+    }
+
+    // Spawn queue
+    if(spawnQ.length>0){
+      spawnT-=dt;
+      if(spawnT<=0){
+        spawnEnemy(spawnQ.shift());
+        spawnT=rnd(.45,.95); updateHUD();
+      }
+    }
+
+    // Volgende golf
+    if(wDone&&spawnQ.length===0){
+      nextWave-=dt;
+      if(nextWave<=0){ wave++; startWave(); }
+    }
+
+    // Vijand AI
+    const px=camera.position.x, pz=camera.position.z;
+    for(const e of enemies){
+      if(!e.alive) continue;
+      const ex=e.mesh.position.x, ez=e.mesh.position.z;
+      const dx=px-ex, dz=pz-ez;
+      const dist=Math.sqrt(dx*dx+dz*dz);
+
+      if(dist>1.65){
+        // Beweeg naar speler (klein random voor obstakelomzeiling)
+        let nx=dx/dist + (Math.random()-.5)*.07;
+        let nz=dz/dist + (Math.random()-.5)*.07;
+        e.mesh.position.x+=nx*e.spd*dt;
+        e.mesh.position.z+=nz*e.spd*dt;
+      }
+
+      // Kijk naar speler
+      e.mesh.rotation.y=Math.atan2(dx,dz);
+
+      // Loop-bobbing
+      e.animT+=dt*e.spd*.8;
+      e.mesh.position.y=Math.abs(Math.sin(e.animT*3.5))*.12;
+
+      // Aanval
+      if(dist<1.82){
+        e.atkT-=dt;
+        if(e.atkT<=0){ hurtPlayer(e.dmg); e.atkT=e.atkR; }
+      }
+    }
+
+    // Particles
+    tickParts(dt);
+  }
+
+  renderer.render(scene,camera);
+}
+
+// ── Init spel ─────────────────────────────────────────────
+function initGame(){
+  hp=100; ammo=MAXAMMO; kills=0; score=0; wave=1;
+  reloading=false; reloadT=0; shootCD=0;
+  wDone=false; yaw=0; pitch=0;
+  camera.position.set(0,1.72,0);
+  for(const e of enemies){ if(e.alive) scene.remove(e.mesh); }
+  enemies.length=0;
+  for(const p of parts) scene.remove(p.mesh);
+  parts.length=0;
+  document.getElementById('lowhp').style.display='none';
+  document.getElementById('rld').style.display='none';
+  document.getElementById('ac').textContent=MAXAMMO;
+  startWave(); updateHUD(); started=true;
+}
+
+// ── Knoppen ───────────────────────────────────────────────
+document.getElementById('startBtn').addEventListener('click',()=>{
+  initAudio();
+  document.getElementById('startScreen').style.display='none';
+  document.getElementById('hud').style.display='block';
+  renderer.domElement.requestPointerLock();
+  initGame();
+});
+
+document.getElementById('rstBtn').addEventListener('click',()=>{
+  document.getElementById('goScreen').style.display='none';
+  document.getElementById('hud').style.display='block';
+  initAudio();
+  renderer.domElement.requestPointerLock();
+  initGame();
+});
+
+window.addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+// Start render-loop (wereld al zichtbaar in menu)
+animate();
+</script>
+</body>
+</html>
