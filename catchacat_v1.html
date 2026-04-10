@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Catch-a-Cat</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #1a1a2e;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      color: #fff;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 12px;
+      letter-spacing: 2px;
+      color: #f0c040;
+      text-shadow: 0 2px 8px #0006;
+    }
+
+    #gameWrap {
+      position: relative;
+      width: 600px;
+      height: 600px;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 8px 40px #0008;
+    }
+
+    canvas {
+      display: block;
+      background: #2a2a3e;
+    }
+
+    /* ---- overlays ---- */
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(10, 10, 30, 0.82);
+      gap: 18px;
+    }
+
+    .overlay.hidden { display: none; }
+
+    .overlay h2 {
+      font-size: 2.4rem;
+      color: #f0c040;
+      text-shadow: 0 2px 12px #0008;
+    }
+
+    .overlay p {
+      font-size: 1.05rem;
+      color: #ccc;
+      text-align: center;
+      max-width: 380px;
+      line-height: 1.6;
+    }
+
+    .overlay .result {
+      font-size: 1.5rem;
+      color: #7ecf7e;
+      font-weight: bold;
+    }
+
+    .btn {
+      padding: 12px 36px;
+      font-size: 1.1rem;
+      border: none;
+      border-radius: 8px;
+      background: #f0c040;
+      color: #1a1a2e;
+      font-weight: bold;
+      cursor: pointer;
+      letter-spacing: 1px;
+      transition: background 0.15s, transform 0.1s;
+    }
+
+    .btn:hover  { background: #f8d860; transform: scale(1.05); }
+    .btn:active { transform: scale(0.97); }
+
+    /* cat legend under canvas */
+    #legend {
+      margin-top: 12px;
+      display: flex;
+      gap: 28px;
+      font-size: 0.92rem;
+      color: #aaa;
+    }
+
+    .leg-dot {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      vertical-align: middle;
+      margin-right: 5px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Catch-a-Cat</h1>
+
+<div id="gameWrap">
+  <canvas id="c" width="600" height="600"></canvas>
+
+  <!-- Menu overlay -->
+  <div class="overlay" id="menuScreen">
+    <h2>Catch-a-Cat!</h2>
+    <p>You control the <strong style="color:#e03030">red cat</strong>.<br>
+       Chase down the sneaky <strong style="color:#aaa">gray cat</strong> before it escapes!</p>
+    <p style="font-size:0.9rem; color:#888">Move with <kbd>WASD</kbd> or <kbd>Arrow Keys</kbd></p>
+    <button class="btn" id="startBtn">Play</button>
+  </div>
+
+  <!-- Caught overlay -->
+  <div class="overlay hidden" id="caughtScreen">
+    <h2>Caught!</h2>
+    <p class="result" id="timeResult"></p>
+    <p style="color:#aaa;font-size:0.9rem">Best: <span id="bestResult">--</span></p>
+    <button class="btn" id="retryBtn">Play Again</button>
+  </div>
+</div>
+
+<div id="legend">
+  <span><span class="leg-dot" style="background:#e03030"></span> You (red cat)</span>
+  <span><span class="leg-dot" style="background:#888"></span> Prey (gray cat)</span>
+</div>
+
+<script>
+'use strict';
+
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// ── State ────────────────────────────────────────────────────────────────────
+let state = 'menu';   // 'menu' | 'playing' | 'caught'
+let elapsed = 0;      // seconds in current round
+let bestTime = null;
+let lastTime = 0;
+
+// ── Input ────────────────────────────────────────────────────────────────────
+const keys = {};
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  e.preventDefault(); // stop arrow-key scrolling
+}, { passive: false });
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// ── Obstacles ────────────────────────────────────────────────────────────────
+// { x, y, w, h }  — static walls both cats collide with
+const walls = [
+  { x: 120, y: 140, w: 90, h: 20 },
+  { x: 390, y: 140, w: 90, h: 20 },
+  { x: 240, y: 270, w: 120, h: 20 },
+  { x: 100, y: 380, w: 20, h: 100 },
+  { x: 480, y: 380, w: 20, h: 100 },
+  { x: 220, y: 460, w: 160, h: 20 },
+];
+
+// ── Cat factory ───────────────────────────────────────────────────────────────
+function makeCat(x, y, speed, color, isPlayer) {
+  return { x, y, vx: 0, vy: 0, speed, color, isPlayer,
+           wobbleAngle: Math.random() * Math.PI * 2,
+           facing: 1,   // 1 = right, -1 = left
+           legPhase: 0  // for simple leg animation
+         };
+}
+
+let player, prey;
+
+function resetCats() {
+  player = makeCat(100, 100, 180, '#e03030', true);
+  prey   = makeCat(480, 480, 162, '#888888', false);
+}
+
+// ── AABB collision helper ─────────────────────────────────────────────────────
+function collidesWall(cx, cy, r) {
+  for (const w of walls) {
+    const nearX = Math.max(w.x, Math.min(cx, w.x + w.w));
+    const nearY = Math.max(w.y, Math.min(cy, w.y + w.h));
+    const dx = cx - nearX, dy = cy - nearY;
+    if (dx * dx + dy * dy < r * r) return w;
+  }
+  return null;
+}
+
+function resolveWallCollision(cat, r) {
+  let hit;
+  // iterate a couple times for corners
+  for (let iter = 0; iter < 3; iter++) {
+    hit = collidesWall(cat.x, cat.y, r);
+    if (!hit) break;
+    // push cat out of wall on shallowest axis
+    const overlapLeft  = (cat.x + r) - hit.x;
+    const overlapRight = (hit.x + hit.w) - (cat.x - r);
+    const overlapTop   = (cat.y + r) - hit.y;
+    const overlapBot   = (hit.y + hit.h) - (cat.y - r);
+    const minO = Math.min(overlapLeft, overlapRight, overlapTop, overlapBot);
+    if (minO === overlapLeft)  { cat.x -= overlapLeft;  cat.vx = Math.min(cat.vx, 0); }
+    else if (minO === overlapRight) { cat.x += overlapRight; cat.vx = Math.max(cat.vx, 0); }
+    else if (minO === overlapTop)   { cat.y -= overlapTop;   cat.vy = Math.min(cat.vy, 0); }
+    else                            { cat.y += overlapBot;   cat.vy = Math.max(cat.vy, 0); }
+  }
+}
+
+// ── Update ────────────────────────────────────────────────────────────────────
+const CAT_R = 18; // collision radius
+
+function updatePlayer(dt) {
+  let dx = 0, dy = 0;
+  if (keys['ArrowLeft']  || keys['KeyA']) dx -= 1;
+  if (keys['ArrowRight'] || keys['KeyD']) dx += 1;
+  if (keys['ArrowUp']    || keys['KeyW']) dy -= 1;
+  if (keys['ArrowDown']  || keys['KeyS']) dy += 1;
+
+  if (dx !== 0 || dy !== 0) {
+    const len = Math.hypot(dx, dy);
+    player.vx = (dx / len) * player.speed;
+    player.vy = (dy / len) * player.speed;
+    player.facing = dx > 0 ? 1 : dx < 0 ? -1 : player.facing;
+    player.legPhase += dt * 6;
+  } else {
+    player.vx *= 0.8;
+    player.vy *= 0.8;
+  }
+
+  player.x += player.vx * dt;
+  player.y += player.vy * dt;
+
+  // wall bounce
+  if (player.x < CAT_R)     { player.x = CAT_R;     player.vx = Math.abs(player.vx); }
+  if (player.x > W - CAT_R) { player.x = W - CAT_R; player.vx = -Math.abs(player.vx); }
+  if (player.y < CAT_R)     { player.y = CAT_R;     player.vy = Math.abs(player.vy); }
+  if (player.y > H - CAT_R) { player.y = H - CAT_R; player.vy = -Math.abs(player.vy); }
+
+  resolveWallCollision(player, CAT_R);
+}
+
+function updatePrey(dt) {
+  const dx = prey.x - player.x;
+  const dy = prey.y - player.y;
+  const dist = Math.hypot(dx, dy) || 1;
+
+  // Flee direction (away from player)
+  let fx = dx / dist;
+  let fy = dy / dist;
+
+  // wobble: slight random direction change
+  prey.wobbleAngle += dt * (1.5 + Math.random() * 0.5);
+  const wobble = 0.4;
+  fx += Math.cos(prey.wobbleAngle) * wobble;
+  fy += Math.sin(prey.wobbleAngle) * wobble;
+
+  // If very close, panic — pick a random 180° escape
+  if (dist < 100) {
+    const panicAngle = Math.atan2(fy, fx) + (Math.random() - 0.5) * Math.PI;
+    fx = Math.cos(panicAngle);
+    fy = Math.sin(panicAngle);
+  }
+
+  const len = Math.hypot(fx, fy) || 1;
+  prey.vx = (fx / len) * prey.speed;
+  prey.vy = (fy / len) * prey.speed;
+  prey.facing = prey.vx > 0 ? 1 : -1;
+  prey.legPhase += dt * 5;
+
+  prey.x += prey.vx * dt;
+  prey.y += prey.vy * dt;
+
+  if (prey.x < CAT_R)     { prey.x = CAT_R;     prey.vx = Math.abs(prey.vx); }
+  if (prey.x > W - CAT_R) { prey.x = W - CAT_R; prey.vx = -Math.abs(prey.vx); }
+  if (prey.y < CAT_R)     { prey.y = CAT_R;     prey.vy = Math.abs(prey.vy); }
+  if (prey.y > H - CAT_R) { prey.y = H - CAT_R; prey.vy = -Math.abs(prey.vy); }
+
+  resolveWallCollision(prey, CAT_R);
+}
+
+function update(dt) {
+  if (state !== 'playing') return;
+  elapsed += dt;
+  updatePlayer(dt);
+  updatePrey(dt);
+
+  // catch check
+  const dx = player.x - prey.x, dy = player.y - prey.y;
+  if (dx * dx + dy * dy < 42 * 42) {
+    triggerCaught();
+  }
+}
+
+// ── Draw helpers ──────────────────────────────────────────────────────────────
+
+function drawCat(cat) {
+  ctx.save();
+  ctx.translate(cat.x, cat.y);
+  ctx.scale(cat.facing, 1);
+
+  const c = cat.color;
+  const legSwing = Math.sin(cat.legPhase) * 6;
+
+  // tail
+  ctx.beginPath();
+  ctx.moveTo(-8, 2);
+  ctx.bezierCurveTo(-28, -10, -38, 10, -32, 22);
+  ctx.strokeStyle = c;
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+
+  // body
+  ctx.beginPath();
+  ctx.ellipse(0, 4, 14, 10, 0, 0, Math.PI * 2);
+  ctx.fillStyle = c;
+  ctx.fill();
+
+  // legs (front and back)
+  ctx.strokeStyle = c;
+  ctx.lineWidth = 3.5;
+  ctx.lineCap = 'round';
+
+  // back legs
+  ctx.beginPath(); ctx.moveTo(-7, 12); ctx.lineTo(-10, 22 - legSwing); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-3, 13); ctx.lineTo(-4,  22 + legSwing); ctx.stroke();
+  // front legs
+  ctx.beginPath(); ctx.moveTo(6,  12); ctx.lineTo(10, 22 + legSwing); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(10, 10); ctx.lineTo(14, 22 - legSwing); ctx.stroke();
+
+  // head
+  ctx.beginPath();
+  ctx.arc(14, -4, 11, 0, Math.PI * 2);
+  ctx.fillStyle = c;
+  ctx.fill();
+
+  // ears
+  ctx.fillStyle = c;
+  ctx.beginPath(); ctx.moveTo(8, -13); ctx.lineTo(12, -20); ctx.lineTo(16, -13); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(18, -13); ctx.lineTo(22, -20); ctx.lineTo(25, -13); ctx.closePath(); ctx.fill();
+
+  // inner ears
+  const innerEarColor = cat.isPlayer ? '#f08080' : '#ccc';
+  ctx.fillStyle = innerEarColor;
+  ctx.beginPath(); ctx.moveTo(10, -14); ctx.lineTo(12, -18); ctx.lineTo(15, -14); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(19, -14); ctx.lineTo(21, -18); ctx.lineTo(24, -14); ctx.closePath(); ctx.fill();
+
+  // eyes
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.ellipse(11, -5, 3.5, 3, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(18, -5, 3.5, 3, 0, 0, Math.PI * 2); ctx.fill();
+
+  // pupils
+  ctx.fillStyle = '#222';
+  ctx.beginPath(); ctx.ellipse(11.5, -5, 1.6, 2, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(18.5, -5, 1.6, 2, 0, 0, Math.PI * 2); ctx.fill();
+
+  // nose
+  ctx.fillStyle = cat.isPlayer ? '#ff8080' : '#bbb';
+  ctx.beginPath(); ctx.arc(14.5, -1, 2, 0, Math.PI * 2); ctx.fill();
+
+  // whiskers
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(30, -3); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(16, 1); ctx.lineTo(30,  2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(13, 0); ctx.lineTo(0, -3);  ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(13, 1); ctx.lineTo(0,  2);  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawWalls() {
+  for (const w of walls) {
+    ctx.fillStyle = '#3a3a5e';
+    ctx.strokeStyle = '#5a5a8e';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(w.x, w.y, w.w, w.h, 4);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+function drawArena() {
+  // floor tiles
+  ctx.fillStyle = '#2a2a3e';
+  ctx.fillRect(0, 0, W, H);
+
+  // subtle grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= W; x += 40) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = 0; y <= H; y += 40) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // border
+  ctx.strokeStyle = '#4a4a7e';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
+}
+
+function drawHUD() {
+  const t = elapsed.toFixed(1);
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(8, 8, 130, 32);
+  ctx.fillStyle = '#f0c040';
+  ctx.font = 'bold 17px Segoe UI, Arial';
+  ctx.fillText(`Time: ${t}s`, 18, 28);
+
+  // distance indicator (right side)
+  const dist = Math.hypot(player.x - prey.x, player.y - prey.y);
+  const pct  = Math.max(0, 1 - dist / 600);
+  const bar  = 100;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(W - 8 - bar - 60, 8, bar + 60, 32);
+  ctx.fillStyle = '#aaa';
+  ctx.font = '13px Segoe UI, Arial';
+  ctx.fillText('Close:', W - 8 - bar - 55, 28);
+  ctx.fillStyle = '#2a2a3e';
+  ctx.fillRect(W - 8 - bar, 14, bar, 14);
+  ctx.fillStyle = `hsl(${120 * pct}, 80%, 55%)`;
+  ctx.fillRect(W - 8 - bar, 14, bar * pct, 14);
+}
+
+function draw() {
+  drawArena();
+  drawWalls();
+  if (state === 'playing' || state === 'caught') {
+    drawCat(prey);
+    drawCat(player);
+    drawHUD();
+  }
+}
+
+// ── Game flow ─────────────────────────────────────────────────────────────────
+
+function startGame() {
+  resetCats();
+  elapsed = 0;
+  state = 'playing';
+  document.getElementById('menuScreen').classList.add('hidden');
+  document.getElementById('caughtScreen').classList.add('hidden');
+}
+
+function triggerCaught() {
+  state = 'caught';
+  const t = elapsed.toFixed(2);
+  if (bestTime === null || elapsed < bestTime) bestTime = elapsed;
+
+  document.getElementById('timeResult').textContent = `You caught it in ${t}s!`;
+  document.getElementById('bestResult').textContent  = bestTime.toFixed(2) + 's';
+  document.getElementById('caughtScreen').classList.remove('hidden');
+}
+
+// ── Game loop ─────────────────────────────────────────────────────────────────
+
+function loop(ts) {
+  const dt = Math.min((ts - lastTime) / 1000, 0.05);
+  lastTime = ts;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('retryBtn').addEventListener('click', startGame);
+
+resetCats();
+requestAnimationFrame(ts => { lastTime = ts; requestAnimationFrame(loop); });
+</script>
+</body>
+</html>
